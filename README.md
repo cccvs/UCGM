@@ -38,7 +38,7 @@ Official PyTorch implementation of **UCGM** **T**rainer and **S**ampler (**UCGM-
 - :white_check_mark: **Cuts 84% of sampling steps (Steps=250 → Steps=40) while improving FID (1.26 → 1.06)**  
   :white_check_mark: **Training-free** and **no additional cost introduced**  
 
-- :bar_chart: **Extended results** for more accelerated models are available [here](#fast_forward-ucgm-s-plug-and-play-acceleration).  
+- :bar_chart: **Extended results** for more accelerated models are available [here](#rocket-ucgm-s-plug-and-play-acceleration).  
 
 :zap: **Lightning-Fast Model Tuning**: UCGM-T transforms any pre-trained multi-step continuous model (e.g., REPA-E with FID=1.54 at NFE=80) into a **high-performance, few-step generator** with **record efficiency**:  
 - :white_check_mark: **FID=1.39 @ Steps=NFE=2 (ImageNet-1K 256×256)**  
@@ -52,7 +52,7 @@ Official PyTorch implementation of **UCGM** **T**rainer and **S**ampler (**UCGM-
   :white_check_mark: No classifier-free guidance or other techniques—**simpler and faster**  
   :white_check_mark: Compatible with diverse datasets (ImageNet, CIFAR, etc.) and architectures (CNNs, Transformers)—**high flexibility**  
 
-- :bar_chart: **Extended results** for additional trained models are available [here](#gear-ucgm-ts-efficient-unified-framework).  
+- :bar_chart: **Extended results** for additional trained models are available [here](#fire-ucgm-ts-efficient-unified-framework).  
 
 :book: Check more detailed features in our [paper](https://arxiv.org/abs/2505.07447)!  
 
