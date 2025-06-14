@@ -14,7 +14,7 @@ vae:
   downsample_ratio: 8
 
 model:
-  type: SiT-XL/2
+  type: EDM2-S
   in_chans: 4
 
 train:
@@ -23,16 +23,14 @@ train:
   no_reuni: True
   no_buffer: False
   max_steps: 800
-  # global_batch_size: 1024
-  global_batch_size: 8
+  global_batch_size: 1024
   global_seed: 0
   log_every: 100
   ckpt_every: 800
   ema_decay: 0.99
 
 optimizer:
-  # type: 'RAdam'
-  type: 'CLion'
+  type: 'RAdam'
   lr: 0.0001
   weight_decay: 0.0
   beta1: 0.9
@@ -40,7 +38,7 @@ optimizer:
   max_grad_norm: 0.1
 
 transport:
-  type: Linear
+  type: EDM
   lab_drop_ratio: 0.1
   consistc_ratio: 1.0
   enhanced_ratio: 1.7

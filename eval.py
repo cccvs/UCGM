@@ -138,7 +138,7 @@ def do_sample(
     samples_needed_this_gpu = int(total_samples // accelerator.num_processes)
     assert (
         samples_needed_this_gpu % n == 0
-    ), "samples_needed_this_gpu must be divisible by the per-GPU batch size"
+    ), f"samples_needed_this_gpu must be divisible by the per-GPU batch size, {samples_needed_this_gpu} % {n} = {samples_needed_this_gpu % n}"
     iterations = int(samples_needed_this_gpu // n)
 
     # Generate labels:

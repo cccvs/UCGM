@@ -18,15 +18,18 @@ model:
   in_chans: 32
 
 train:
-  ckpt: "0000000.pt" # <---- a model trined using "REPA-E" (https://github.com/End2End-Diffusion/REPA-E)
+  ckpt: "0000000.pt" # <---- a model trained using "REPA-E" (https://github.com/End2End-Diffusion/REPA-E)
   no_reopt: True
   no_reuni: True
   no_buffer: False
-  max_steps: 500
-  global_batch_size: 1024
+  # max_steps: 500
+  max_steps: 2000
+  # global_batch_size: 1024
+  global_batch_size: 256
   global_seed: 0
   log_every: 100
-  ckpt_every: 500
+  # ckpt_every: 500
+  ckpt_every: 1000
   ema_decay: 0.99
 
 optimizer:
@@ -51,7 +54,7 @@ transport:
   wt_cosine_loss: False
 
 sample:
-  ckpt: "0000500.pt"
+  ckpt: "0002000.pt"
   type: UNI
   cfg_scale: 0.0
   cfg_interval: [0.00, 0.75]

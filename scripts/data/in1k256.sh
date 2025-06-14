@@ -6,7 +6,7 @@ MASTER_PORT=${MASTER_PORT:-1235}
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 PRECISION=${PRECISION:-bf16}
 
-DATA_PATH=${DATA_PATH:-/path/to/your/data/ImageNet-1K/train}
+DATA_PATH=${DATA_PATH:-/data/datasets/imagenet1k/train}
 CONFIGS=(
     sdvae_f8c4
     vavae_f16d32

@@ -17,16 +17,28 @@ model:
   type: LightningDiT-XL/1
   in_chans: 32
 
+# train:
+#   ckpt: "0000000.pt" # <---- a model trined using "LightningDiT" (https://github.com/hustvl/LightningDiT)
+#   no_reopt: True
+#   no_reuni: True
+#   no_buffer: False
+#   max_steps: 800
+#   global_batch_size: 1024
+#   global_seed: 0
+#   log_every: 100
+#   ckpt_every: 800
+#   ema_decay: 0.99
+
 train:
   ckpt: "0000000.pt" # <---- a model trined using "LightningDiT" (https://github.com/hustvl/LightningDiT)
   no_reopt: True
   no_reuni: True
   no_buffer: False
-  max_steps: 800
-  global_batch_size: 1024
+  max_steps: 3200
+  global_batch_size: 256
   global_seed: 0
   log_every: 100
-  ckpt_every: 800
+  ckpt_every: 1600
   ema_decay: 0.99
 
 optimizer:
@@ -51,7 +63,7 @@ transport:
   wt_cosine_loss: False
 
 sample:
-  ckpt: "0000800.pt"
+  ckpt: "0003200.pt"
   type: UNI
   cfg_scale: 0.0
   cfg_interval: [0.125, 1.0]
@@ -61,7 +73,8 @@ sample:
   sampling_order: 1
   time_dist_ctrl: [1.0, 1.0, 1.0]
   rfba_gap_steps: [0.001, 0.60]
-  per_batch_size: 125
+  # per_batch_size: 125
+  per_batch_size: 50
   fid_sample_num: 50000
 
 
