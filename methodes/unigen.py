@@ -215,6 +215,8 @@ class UCGMTS(torch.nn.Module):
 
     def enhance_target(self, target, idx, ndrop, pred_w_c, pred_wo_c):
         idx = idx[:-ndrop]
+        # print(f"Enhance target with {self.enr} ratio, {idx.sum().item()} samples enhanced")
+        # print(f"dtype of target: {target.dtype}, pred_w_c: {pred_w_c.dtype}, pred_wo_c: {pred_wo_c.dtype}")
         target[:-ndrop][idx] = target[:-ndrop][idx] + self.enr * (
             pred_w_c[:-ndrop][idx] - pred_wo_c[:-ndrop][idx]
         )
@@ -226,14 +228,16 @@ class UCGMTS(torch.nn.Module):
         t = self.sample_beta(self.tdc[0], self.tdc[1], [x.size(0), 1, 1, 1]).to(x)
         t = torch.clamp(t * self.tdc[2], min=0, max=1)
         z = torch.randn_like(x)
-        nullc = get_attr_from_nested_module(model, "num_classes")
+        # nullc = get_attr_from_nested_module(model, "num_classes")   # 未定义的一类
+        # ndrop = round(self.tdr * len(c))
+        # c[-ndrop:] = nullc
         ndrop = round(self.tdr * len(c))
-        c[-ndrop:] = nullc
+        c[-ndrop:] = 0.0  # Dropout labels for enhanced target
 
         # Initialize target and model prediction
         x_t = z * self.alpha_in(t) + x * self.gamma_in(t)
         rng_state = torch.cuda.get_rng_state()
-        x_wc_t, z_wc_t, F_th_t, den_t = self.forward(model, x_t, t, **dict(y=c))
+        x_wc_t, z_wc_t, F_th_t, den_t = self.forward(model, x_t, t, **dict(encoder_hidden_states=c))
         xs_target, zs_target, target = x, z, z * self.alpha_to(t) + x * self.gamma_to(t)
 
         with torch.no_grad():
@@ -250,21 +254,23 @@ class UCGMTS(torch.nn.Module):
             if self.enr != 0.0:
                 if self.ens == "fc-vs-fe":  # To learning enhanced target score function
                     # Get enhanced learning target that is compatible for most scenarios
-                    e = torch.ones_like(c) * nullc
+                    # e = torch.ones_like(c) * nullc
+                    e = torch.zeros_like(c) # Use a constant value for enhanced target
                     torch.cuda.set_rng_state(rng_state)
-                    refer_x, refer_z, _, _ = self.forward(self.mod, x_t, t, **dict(y=e))
+                    refer_x, refer_z, _, _ = self.forward(self.mod, x_t, t, **dict(encoder_hidden_states=e))
                     torch.cuda.set_rng_state(rng_state)
-                    predc_x, predc_z, _, _ = self.forward(self.mod, x_t, t, **dict(y=c))
+                    predc_x, predc_z, _, _ = self.forward(self.mod, x_t, t, **dict(encoder_hidden_states=c))
                 elif self.ens == "ft-vs-fe":  # Lightning version to performs "fc-vs-fe"
                     # Get enhanced learning target to support multi-step models training
-                    e = torch.ones_like(c) * nullc
+                    # e = torch.ones_like(c) * nullc
+                    e = torch.zeros_like(c)  # Use a constant value for enhanced target
                     torch.cuda.set_rng_state(rng_state)
-                    refer_x, refer_z, _, _ = self.forward(self.mod, x_t, t, **dict(y=e))
+                    refer_x, refer_z, _, _ = self.forward(self.mod, x_t, t, **dict(encoder_hidden_states=e))
                     predc_x, predc_z = x_wc_t.data, z_wc_t.data
                 elif self.ens == "fc-vs-xz":  # Lightning version to performs "fc-vs-fe"
                     # Get enhanced learning target to facilitate few-step model training
                     refer_x, refer_z = xs_target, zs_target
-                    predc_x, predc_z, _, _ = self.forward(self.mod, x_t, t, **dict(y=c))
+                    predc_x, predc_z, _, _ = self.forward(self.mod, x_t, t, **dict(encoder_hidden_states=c))
                 else:
                     raise ValueError(f"Unsupported target enhancement mode: {self.ens}")
 
@@ -278,7 +284,7 @@ class UCGMTS(torch.nn.Module):
                 def xfunc(r):
                     torch.cuda.set_rng_state(rng_state)
                     xr = self.alpha_in(r) * z + self.gamma_in(r) * x
-                    _, _, F_th_r, den_r = self.forward(model.module, xr, r, **dict(y=c))
+                    _, _, F_th_r, den_r = self.forward(model.module, xr, r, **dict(encoder_hidden_states=c))
                     if self.enr != 0.0:
                         xr = zs_target * self.alpha_in(r) + xs_target * self.gamma_in(r)
                     pred_x = (F_th_r * self.alpha_in(r) - xr * self.alpha_to(r)) / den_r

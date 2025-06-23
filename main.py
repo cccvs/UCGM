@@ -234,7 +234,7 @@ def do_train(train_config, accelerator):
                     checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}.pt"
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
-                    demox = unigen.sampling_loop(demo_z, ema, **dict(y=demo_y))
+                    demox = unigen.sampling_loop(demo_z, ema, **dict(encoder_hidden_states=demo_y))
                     demox = demox[1::2].reshape(-1, *demox.shape[2:])
                     demox = (demox * stad) / latent_multiplier + mean
                     demox = vae.decode_to_images(demox).cpu()

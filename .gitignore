@@ -149,3 +149,5 @@ dmypy.json
 # Others
 *outputs
 *buffers
+sd_data_2k
+stable-diffusion-v1-5

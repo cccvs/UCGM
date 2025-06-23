@@ -15,6 +15,8 @@ import argparse
 import json
 import time
 import itertools
+import numpy as np
+from tqdm import tqdm
 from time import time
 from copy import deepcopy
 from accelerate import Accelerator
@@ -40,10 +42,11 @@ else:
     from ip_adapter.attention_processor import IPAttnProcessor, AttnProcessor
 
 
-# Dataset
+
+
 class MyDataset(torch.utils.data.Dataset):
 
-    def __init__(self, json_file, tokenizer, size=512, t_drop_rate=0.05, i_drop_rate=0.05, ti_drop_rate=0.05, image_root_path=""):
+    def __init__(self, json_file, tokenizer, size=512, t_drop_rate=0.05, i_drop_rate=0.05, ti_drop_rate=0.05, image_root_path="", vae=None, compute_latent_stats=False):
         super().__init__()
 
         self.tokenizer = tokenizer
@@ -52,8 +55,9 @@ class MyDataset(torch.utils.data.Dataset):
         self.t_drop_rate = t_drop_rate
         self.ti_drop_rate = ti_drop_rate
         self.image_root_path = image_root_path
+        self.vae = vae
 
-        self.data = json.load(open(json_file)) # list of dict: [{"image_file": "1.png", "text": "A dog"}]
+        self.data = json.load(open(json_file))
 
         self.transform = transforms.Compose([
             transforms.Resize(self.size, interpolation=transforms.InterpolationMode.BILINEAR),
@@ -63,6 +67,123 @@ class MyDataset(torch.utils.data.Dataset):
         ])
         self.clip_image_processor = CLIPImageProcessor()
         
+        # Initialize latent statistics
+        self._latent_mean = None
+        self._latent_std = None
+        self.latent_multiplier = 1.0
+        
+        # Compute latent statistics if requested
+        if compute_latent_stats and vae is not None:
+            self._compute_latent_statistics()
+        
+    def _compute_latent_statistics(self, sample_size=1000, batch_size=16):
+        """
+        Compute mean and std of latent representations
+        
+        Args:
+            sample_size: Number of samples to use for statistics computation
+            batch_size: Batch size for processing
+        """
+        print("Computing latent statistics...")
+        
+        # Sample subset of data
+        sample_indices = np.random.choice(len(self.data), 
+                                        min(sample_size, len(self.data)), 
+                                        replace=False)
+        
+        latents = []
+        
+        # Temporarily disable dropout for consistent statistics
+        original_i_drop = self.i_drop_rate
+        original_t_drop = self.t_drop_rate
+        original_ti_drop = self.ti_drop_rate
+        self.i_drop_rate = 0.0
+        self.t_drop_rate = 0.0
+        self.ti_drop_rate = 0.0
+        
+        self.vae.eval()
+        with torch.no_grad():
+            for i in tqdm(range(0, len(sample_indices), batch_size), desc="Computing latent stats"):
+                batch_indices = sample_indices[i:i+batch_size]
+                batch_images = []
+                
+                for idx in batch_indices:
+                    item = self.__getitem__(idx)
+                    batch_images.append(item["image"])
+                
+                # Stack batch
+                batch_tensor = torch.stack(batch_images).to(self.vae.device, dtype=self.vae.dtype)
+                
+                posterior = self.vae.encode(batch_tensor).latent_dist
+                batch_latents = posterior.sample()  # or posterior.mean
+                
+                latents.append(batch_latents.cpu())
+        
+        # Restore original dropout rates
+        self.i_drop_rate = original_i_drop
+        self.t_drop_rate = original_t_drop
+        self.ti_drop_rate = original_ti_drop
+        
+        # Concatenate all latents
+        all_latents = torch.cat(latents, dim=0)
+        
+        # Compute statistics
+        # Flatten spatial dimensions but keep channel dimension
+        # Shape: [N, C, H, W] -> [N*H*W, C]
+        flattened_latents = all_latents.permute(0, 2, 3, 1).reshape(-1, all_latents.shape[1])
+        
+        self._latent_mean = flattened_latents.mean(dim=0)  # [C]
+        self._latent_std = flattened_latents.std(dim=0)    # [C]
+        
+        # Prevent division by zero
+        self._latent_std = torch.clamp(self._latent_std, min=1e-6)
+        
+        # Set latent multiplier (can be tuned based on your needs)
+        self.latent_multiplier = 1.0 / self._latent_std.mean().item()
+        
+        print(f"Latent mean shape: {self._latent_mean.shape}")
+        print(f"Latent std shape: {self._latent_std.shape}")
+        print(f"Latent multiplier: {self.latent_multiplier}")
+        print(f"Mean of latent mean: {self._latent_mean.mean().item():.6f}")
+        print(f"Mean of latent std: {self._latent_std.mean().item():.6f}")
+
+    def get_latent_stats_cuda(self):
+        """
+        Return latent statistics on CUDA
+        """
+        if self._latent_mean is None or self._latent_std is None:
+            raise ValueError("Latent statistics not computed. Set compute_latent_stats=True during initialization.")
+        
+        return (
+            self._latent_mean.cuda(),
+            self._latent_std.cuda(),
+            self.latent_multiplier
+        )
+    
+    def save_latent_stats(self, filepath):
+        """
+        Save latent statistics to file
+        """
+        if self._latent_mean is None or self._latent_std is None:
+            raise ValueError("No latent statistics to save.")
+        
+        torch.save({
+            'latent_mean': self._latent_mean,
+            'latent_std': self._latent_std,
+            'latent_multiplier': self.latent_multiplier
+        }, filepath)
+        print(f"Latent statistics saved to {filepath}")
+    
+    def load_latent_stats(self, filepath):
+        """
+        Load latent statistics from file
+        """
+        stats = torch.load(filepath, map_location='cpu')
+        self._latent_mean = stats['latent_mean']
+        self._latent_std = stats['latent_std']
+        self.latent_multiplier = stats['latent_multiplier']
+        print(f"Latent statistics loaded from {filepath}")
+
     def __getitem__(self, idx):
         item = self.data[idx] 
         text = item["text"]
@@ -128,9 +249,31 @@ class IPAdapter(torch.nn.Module):
         if ckpt_path is not None:
             self.load_from_checkpoint(ckpt_path)
 
-    def forward(self, noisy_latents, timesteps, encoder_hidden_states, image_embeds):
+    # def forward(self, noisy_latents, timesteps, encoder_hidden_states, image_embeds):
+    #     ip_tokens = self.image_proj_model(image_embeds)
+    #     encoder_hidden_states = torch.cat([encoder_hidden_states, ip_tokens], dim=1)
+    #     # Predict the noise residual
+    #     noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
+    #     return noise_pred
+    
+    def get_encoder_hidden_states(self, text_embeds, image_embeds):
+        """
+        Get encoder hidden states with image embeddings projected by image_proj_model.
+        """
         ip_tokens = self.image_proj_model(image_embeds)
-        encoder_hidden_states = torch.cat([encoder_hidden_states, ip_tokens], dim=1)
+        encoder_hidden_states = torch.cat([text_embeds, ip_tokens], dim=1)
+        return encoder_hidden_states
+    
+    def forward(self, noisy_latents, timesteps, encoder_hidden_states):
+        """
+        Forward pass for the IP-Adapter.
+        Args:
+            noisy_latents: Noisy latents input to the UNet.
+            timesteps: Timesteps for the diffusion process.
+            encoder_hidden_states: Text embeddings concatenated with image embeddings projected by image_proj_model.
+        Returns:
+            noise_pred: Predicted noise residual from the UNet.
+        """
         # Predict the noise residual
         noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
         return noise_pred
@@ -213,12 +356,15 @@ def get_model(train_config, accelerator):
     vae.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     image_encoder.to(accelerator.device, dtype=weight_dtype)
+    # add
+    unet.to(accelerator.device, dtype=weight_dtype)
+    image_proj_model.to(accelerator.device, dtype=weight_dtype)
+    ip_adapter.to(accelerator.device, dtype=weight_dtype)
+
 
     params_to_opt = itertools.chain(ip_adapter.image_proj_model.parameters(),  ip_adapter.adapter_modules.parameters())
 
     return ip_adapter, params_to_opt, tokenizer, vae, text_encoder, image_encoder
-
-
 
 def do_train(train_config, accelerator):
     """
@@ -317,7 +463,9 @@ def do_train(train_config, accelerator):
         json_file=train_config["data"]["json_file"],
         tokenizer=tokenizer,
         size=train_config["data"]["image_size"],
-        image_root_path=train_config["data"]["image_root_path"]
+        image_root_path=train_config["data"]["image_root_path"],
+        vae=vae,
+        compute_latent_stats=True,
     )
     
     batch_size_per_gpu = (
@@ -329,11 +477,11 @@ def do_train(train_config, accelerator):
         dataset,
         batch_size=batch_size_per_gpu,
         shuffle=True,
+        collate_fn=collate_fn,
         num_workers=train_config["data"]["num_workers"],
         pin_memory=True,
         drop_last=True,
     )
-
 
     if accelerator.is_main_process:
         mean, stad, latent_multiplier = (
@@ -341,9 +489,9 @@ def do_train(train_config, accelerator):
             dataset._latent_std.cuda(),
             dataset.latent_multiplier,
         )
-        logger.info(
-            f"Dataset contains {len(dataset):,} images {train_config['data']['data_path']}"
-        )
+        # logger.info(
+        #     f"Dataset contains {len(dataset):,} images {train_config['data']['data_path']}"
+        # )
         logger.info(
             f"Batch size {batch_size_per_gpu} per gpu, with {global_batch_size} global batch size"
         )
@@ -383,13 +531,34 @@ def do_train(train_config, accelerator):
     start_time = time()
 
     while True:
-        for x, y in loader:
-            if accelerator.mixed_precision == "no":
-                x = x.to(device, dtype=torch.float32)
-                y = y.to(device)
-            else:
-                x = x.to(device)
-                y = y.to(device)
+        for batch in loader:
+            # Convert images to latent space
+            with torch.no_grad():
+                latents = vae.encode(batch["images"].to(accelerator.device, dtype=vae.dtype)).latent_dist.sample()
+                latents = latents * vae.config.scaling_factor
+                
+                # Add this debug code before the problematic operation
+                # print(f"latents dtype: {latents.dtype}")
+                # print(f"scaling_factor dtype: {type(vae.config.scaling_factor)}")
+                # print(f"VAE dtype: {next(vae.parameters()).dtype}")
+                # print(f"Text encoder dtype: {next(text_encoder.parameters()).dtype} {text_encoder.dtype}")
+                # print(f"Image encoder dtype: {next(image_encoder.parameters()).dtype} {image_encoder.dtype}")
+
+
+                image_embeds = image_encoder(batch["clip_images"].to(accelerator.device, dtype=image_encoder.dtype)).image_embeds
+                text_embeds = text_encoder(batch["text_input_ids"].to(accelerator.device))[0]
+
+
+            image_embeds_ = []
+            for image_embed, drop_image_embed in zip(image_embeds, batch["drop_image_embeds"]):
+                # if drop_image_embed == 1:
+                #     image_embeds_.append(torch.zeros_like(image_embed))
+                # else:
+                image_embeds_.append(image_embed)
+            image_embeds = torch.stack(image_embeds_)
+
+            x = latents
+            y = model.module.get_encoder_hidden_states(text_embeds, image_embeds)
 
             loss = unigen.training_step(model, x, y)
 
@@ -444,7 +613,7 @@ def do_train(train_config, accelerator):
                     checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}.pt"
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
-                    demox = unigen.sampling_loop(demo_z, ema, **dict(y=demo_y))
+                    demox = unigen.sampling_loop(demo_z, ema, **dict(encoder_hidden_states=demo_y))
                     demox = demox[1::2].reshape(-1, *demox.shape[2:])
                     demox = (demox * stad) / latent_multiplier + mean
                     demox = vae.decode_to_images(demox).cpu()

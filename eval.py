@@ -193,7 +193,7 @@ def do_sample(
                     )
                     model_fn = model.forward_with_cfg
                 else:
-                    model_kwargs = dict(y=y)
+                    model_kwargs = dict(encoder_hidden_states=y)
                     model_fn = model.forward
                 samples = sample_fn(z, model_fn, **model_kwargs)[-1]
                 samples = (samples * latent_std) / latent_multiplier + latent_mean
@@ -221,7 +221,7 @@ def do_sample(
                 )
                 model_fn = model.forward_with_cfg
             else:
-                model_kwargs = dict(y=y)
+                model_kwargs = dict(encoder_hidden_states=y)
                 model_fn = model.forward
 
             samples = sample_fn(z, model_fn, **model_kwargs)[-1]
