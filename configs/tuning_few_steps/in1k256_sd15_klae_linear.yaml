@@ -27,16 +27,17 @@ model:
   pretrained_ip_adapter_path: null
 
 train:
-  # ckpt: "0000000.pt" # <---- a model trined using "REPA" (https://github.com/sihyun-yu/REPA)
+  # ckpt: "0000800.pt" # <---- a model trined using "REPA" (https://github.com/sihyun-yu/REPA)
   no_reopt: True
   no_reuni: True
   no_buffer: False
+  # max_steps: 50
   max_steps: 800
-  # global_batch_size: 1024
-  global_batch_size: 8
+  # global_batch_size: 256
+  global_batch_size: 32
   global_seed: 0
-  log_every: 100
-  ckpt_every: 800
+  log_every: 50
+  ckpt_every: 400
   ema_decay: 0.99
 
 optimizer:
@@ -61,7 +62,7 @@ transport:
   wt_cosine_loss: False
 
 sample:
-  ckpt: "0000800.pt"
+  ckpt: "0003200.pt"
   type: UNI
   cfg_scale: 0.0
   cfg_interval: [0.00, 0.70]

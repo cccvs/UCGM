@@ -126,15 +126,14 @@ class MyDataset(torch.utils.data.Dataset):
         
         # Concatenate all latents
         all_latents = torch.cat(latents, dim=0)
+        print(f"Dimensions of all latents: {all_latents.shape}")
         
         # Compute statistics
         # Flatten spatial dimensions but keep channel dimension
-        # Shape: [N, C, H, W] -> [N*H*W, C]
-        flattened_latents = all_latents.permute(0, 2, 3, 1).reshape(-1, all_latents.shape[1])
-        
-        self._latent_mean = flattened_latents.mean(dim=0)  # [C]
-        self._latent_std = flattened_latents.std(dim=0)    # [C]
-        
+        # Shape: [N, C, H, W] -> [1, C, 1, 1]
+        self._latent_mean = all_latents.mean(dim=[0, 2, 3], keepdim=True)  # [1, C, 1, 1]
+        self._latent_std = all_latents.std(dim=[0, 2, 3], keepdim=True)  # [1, C, 1, 1]
+
         # Prevent division by zero
         self._latent_std = torch.clamp(self._latent_std, min=1e-6)
         
@@ -299,6 +298,24 @@ class IPAdapter(torch.nn.Module):
 
         print(f"Successfully loaded weights from checkpoint {ckpt_path}")
 
+
+def decode_latents_to_images(vae, latents):
+    """将AutoencoderKL的latents解码为图像
+    
+    Args:
+        vae: AutoencoderKL实例
+        latents: 潜在张量
+        
+    Returns:
+        torch.Tensor: [0, 1]范围的图像张量
+    """
+    with torch.no_grad():
+        decoded = vae.decode(latents).sample
+        images = torch.clamp((decoded + 1) / 2, 0, 1)
+        
+    return images
+
+
 def get_model(train_config, accelerator):
     pretrained_model_name_or_path = train_config['model']["pretrained_model_name_or_path"]
     image_encoder_path = train_config['model']["image_encoder_path"]
@@ -407,26 +424,62 @@ def do_train(train_config, accelerator):
     
     ema = deepcopy(model).requires_grad_(False).to(device)
 
+    # if accelerator.is_main_process:
+    #     demoimages_dir = f"{experiment_dir}/demoimages"
+    #     os.makedirs(demoimages_dir, exist_ok=True)
+
+    #     if train_config["data"]["image_size"] == 256:
+    #         demo_y = torch.tensor([975, 3, 207, 387, 388, 88, 979, 279], device=device)
+    #     elif train_config["data"]["image_size"] == 512:
+    #         demo_y = torch.tensor([975, 207], device=device)
+    #     elif train_config["data"]["image_size"] == 32:
+    #         demo_y = torch.tensor(list(range(0, 16)), device=device)
+    #     # demo_z = torch.randn(
+    #     #     len(demo_y), model.in_channels, latent_size, latent_size, device=device
+    #     # )
+
+    #     latent_channels = vae.config.latent_channels
+
+    #     demo_z = torch.randn(
+    #         len(demo_y), latent_channels, latent_size, latent_size, device=device
+    #     )
+
+    #     # vae = AUTOENCS[train_config["vae"]["type"]](train_config["vae"]["type"])
+        
+    #     logger.info("Loaded VAE model")
     if accelerator.is_main_process:
         demoimages_dir = f"{experiment_dir}/demoimages"
         os.makedirs(demoimages_dir, exist_ok=True)
 
-        if train_config["data"]["image_size"] == 256:
-            demo_y = torch.tensor([975, 3, 207, 387, 388, 88, 979, 279], device=device)
-        elif train_config["data"]["image_size"] == 512:
-            demo_y = torch.tensor([975, 207], device=device)
-        elif train_config["data"]["image_size"] == 32:
-            demo_y = torch.tensor(list(range(0, 16)), device=device)
-        # demo_z = torch.randn(
-        #     len(demo_y), model.in_channels, latent_size, latent_size, device=device
-        # )
-        demo_z = torch.randn(
-            len(demo_y), image_encoder.config.projection_dim, latent_size, latent_size, device=device
-        )
-
-        # vae = AUTOENCS[train_config["vae"]["type"]](train_config["vae"]["type"])
+        # 准备demo数据
+        demo_texts = ["a beautiful landscape", "a cute cat"]
+        demo_text_inputs = tokenizer(
+            demo_texts,
+            max_length=tokenizer.model_max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids.to(device)
         
-        logger.info("Loaded VAE model")
+        # 创建假的图像embeddings或使用真实图像
+        batch_size = len(demo_texts)
+        demo_image_embeds = torch.randn(
+            batch_size, 
+            image_encoder.config.projection_dim, 
+            device=device,
+            dtype=image_encoder.dtype
+        )
+        
+        # 生成text embeddings和最终的encoder hidden states
+        with torch.no_grad():
+            demo_text_embeds = text_encoder(demo_text_inputs)[0]
+            demo_y = ema.get_encoder_hidden_states(demo_text_embeds, demo_image_embeds)
+        
+        latent_channels = vae.config.latent_channels
+        demo_z = torch.randn(
+            batch_size, latent_channels, latent_size, latent_size, device=device
+        )
+        print(f"Demo z shape: {demo_z.shape}, demo_y shape: {demo_y.shape}")
 
     unigen = METHODES["unigen"](
         transport_type=train_config["transport"]["type"],
@@ -497,6 +550,7 @@ def do_train(train_config, accelerator):
         )
 
     if "ckpt" in train_config["train"]:
+        checkpoint_path = f"{checkpoint_dir}/{train_config['train']['ckpt']}"
         checkpoint = torch.load(
             checkpoint_path, map_location=lambda storage, loc: storage
         )
@@ -547,7 +601,6 @@ def do_train(train_config, accelerator):
 
                 image_embeds = image_encoder(batch["clip_images"].to(accelerator.device, dtype=image_encoder.dtype)).image_embeds
                 text_embeds = text_encoder(batch["text_input_ids"].to(accelerator.device))[0]
-
 
             image_embeds_ = []
             for image_embed, drop_image_embed in zip(image_embeds, batch["drop_image_embeds"]):
@@ -614,9 +667,13 @@ def do_train(train_config, accelerator):
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
                     demox = unigen.sampling_loop(demo_z, ema, **dict(encoder_hidden_states=demo_y))
+                    print(f"Demoz stats - min: {demo_z.min():.4f}, max: {demo_z.max():.4f}, mean: {demo_z.mean():.4f}")
+                    print(f"Demox stats - min: {demox.min():.4f}, max: {demox.max():.4f}, mean: {demox.mean():.4f}")
+    
                     demox = demox[1::2].reshape(-1, *demox.shape[2:])
+                    print(f"Demox images shape: {demox.shape}, stad shape: {stad.shape}, mean shape: {mean.shape}")
                     demox = (demox * stad) / latent_multiplier + mean
-                    demox = vae.decode_to_images(demox).cpu()
+                    demox = decode_latents_to_images(vae, demox).cpu()
                     demoimages_path = f"{demoimages_dir}/{train_steps:07d}.png"
                     save_image(demox, os.path.join(demoimages_path), nrow=len(demo_y))
                     logger.info(f"Saved demoimages to {demoimages_path}")
