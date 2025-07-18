@@ -424,29 +424,6 @@ def do_train(train_config, accelerator):
     
     ema = deepcopy(model).requires_grad_(False).to(device)
 
-    # if accelerator.is_main_process:
-    #     demoimages_dir = f"{experiment_dir}/demoimages"
-    #     os.makedirs(demoimages_dir, exist_ok=True)
-
-    #     if train_config["data"]["image_size"] == 256:
-    #         demo_y = torch.tensor([975, 3, 207, 387, 388, 88, 979, 279], device=device)
-    #     elif train_config["data"]["image_size"] == 512:
-    #         demo_y = torch.tensor([975, 207], device=device)
-    #     elif train_config["data"]["image_size"] == 32:
-    #         demo_y = torch.tensor(list(range(0, 16)), device=device)
-    #     # demo_z = torch.randn(
-    #     #     len(demo_y), model.in_channels, latent_size, latent_size, device=device
-    #     # )
-
-    #     latent_channels = vae.config.latent_channels
-
-    #     demo_z = torch.randn(
-    #         len(demo_y), latent_channels, latent_size, latent_size, device=device
-    #     )
-
-    #     # vae = AUTOENCS[train_config["vae"]["type"]](train_config["vae"]["type"])
-        
-    #     logger.info("Loaded VAE model")
     if accelerator.is_main_process:
         demoimages_dir = f"{experiment_dir}/demoimages"
         os.makedirs(demoimages_dir, exist_ok=True)
@@ -463,7 +440,13 @@ def do_train(train_config, accelerator):
         
         # 创建假的图像embeddings或使用真实图像
         batch_size = len(demo_texts)
-        demo_image_embeds = torch.randn(
+        # demo_image_embeds = torch.randn(
+        #     batch_size, 
+        #     image_encoder.config.projection_dim, 
+        #     device=device,
+        #     dtype=image_encoder.dtype
+        # )
+        demo_image_embeds = torch.zeros(
             batch_size, 
             image_encoder.config.projection_dim, 
             device=device,
@@ -667,8 +650,8 @@ def do_train(train_config, accelerator):
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
                     demox = unigen.sampling_loop(demo_z, ema, **dict(encoder_hidden_states=demo_y))
-                    print(f"Demoz stats - min: {demo_z.min():.4f}, max: {demo_z.max():.4f}, mean: {demo_z.mean():.4f}")
-                    print(f"Demox stats - min: {demox.min():.4f}, max: {demox.max():.4f}, mean: {demox.mean():.4f}")
+                    # print(f"Demoz stats - min: {demo_z.min():.4f}, max: {demo_z.max():.4f}, mean: {demo_z.mean():.4f}")
+                    # print(f"Demox stats - min: {demox.min():.4f}, max: {demox.max():.4f}, mean: {demox.mean():.4f}")
     
                     demox = demox[1::2].reshape(-1, *demox.shape[2:])
                     print(f"Demox images shape: {demox.shape}, stad shape: {stad.shape}, mean shape: {mean.shape}")

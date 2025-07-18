@@ -24,20 +24,20 @@ vae:
 model:
   pretrained_model_name_or_path: /data/pretrained_models/stable-diffusion-v1-5
   image_encoder_path: /data/pretrained_models/IP-Adapter/models/image_encoder
-  pretrained_ip_adapter_path: null
+  pretrained_ip_adapter_path: /data/pretrained_models/IP-Adapter/models/ip-adapter_sd15.bin
 
 train:
-  # ckpt: "0000800.pt" # <---- a model trined using "REPA" (https://github.com/sihyun-yu/REPA)
+  # ckpt: "0000400.pt" # <---- a model trined using "REPA" (https://github.com/sihyun-yu/REPA)
   no_reopt: True
   no_reuni: True
   no_buffer: False
   # max_steps: 50
-  max_steps: 800
+  max_steps: 1
   # global_batch_size: 256
   global_batch_size: 32
   global_seed: 0
   log_every: 50
-  ckpt_every: 400
+  ckpt_every: 1
   ema_decay: 0.99
 
 optimizer:
@@ -51,7 +51,8 @@ optimizer:
 transport:
   type: Linear
   lab_drop_ratio: 0.1
-  consistc_ratio: 1.0
+  # consistc_ratio: 1.0
+  consistc_ratio: 0.0
   enhanced_ratio: 1.7
   enhanced_style: fc-vs-fe
   scaled_cbl_eps: 5.0

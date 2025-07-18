@@ -151,3 +151,4 @@ dmypy.json
 *buffers
 sd_data_2k
 stable-diffusion-v1-5
+test*

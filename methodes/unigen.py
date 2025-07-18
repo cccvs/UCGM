@@ -398,15 +398,19 @@ class UCGMTS(torch.nn.Module):
         x_hats, z_hats, buffer_freq = [], [], 1
 
         # Main sampling loop
+        print(f"time steps: {t_steps}")
+
         x_cur = inital_noise_z.to(torch.float64)
         samples = [inital_noise_z]
         for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):
+            
+            print(f"Sampling step {i}/{num_steps}, t_cur: {t_cur:.4f}, t_next: {t_next:.4f}, alpha_in: {self.alpha_in(t_cur):.4f}, gamma_in: {self.gamma_in(t_cur):.4f}")
 
             # First order prediction
             x_hat, z_hat, _, _ = self.forward(
                 sampling_model,
-                x_cur.to(torch.float32),
-                t_cur.to(torch.float32),
+                x_cur.to(torch.float16),
+                t_cur.to(torch.float16),
                 **model_kwargs,
             )
             samples.append(x_hat)
@@ -439,8 +443,8 @@ class UCGMTS(torch.nn.Module):
             if sampling_order == 2 and i < num_steps - 1:
                 x_pri, z_pri, _, _ = self.forward(
                     sampling_model,
-                    x_next.to(torch.float32),
-                    t_next.to(torch.float32),
+                    x_next.to(torch.float16),
+                    t_next.to(torch.float16),
                     **model_kwargs,
                 )
                 x_pri, z_pri = x_pri.to(torch.float64), z_pri.to(torch.float64)
@@ -454,4 +458,4 @@ class UCGMTS(torch.nn.Module):
 
             x_cur = x_next
 
-        return torch.stack(samples, dim=0).to(torch.float32)
+        return torch.stack(samples, dim=0).to(torch.float16)
