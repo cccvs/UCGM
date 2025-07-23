@@ -650,8 +650,6 @@ def do_train(train_config, accelerator):
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
                     demox = unigen.sampling_loop(demo_z, ema, **dict(encoder_hidden_states=demo_y))
-                    # print(f"Demoz stats - min: {demo_z.min():.4f}, max: {demo_z.max():.4f}, mean: {demo_z.mean():.4f}")
-                    # print(f"Demox stats - min: {demox.min():.4f}, max: {demox.max():.4f}, mean: {demox.mean():.4f}")
     
                     demox = demox[1::2].reshape(-1, *demox.shape[2:])
                     print(f"Demox images shape: {demox.shape}, stad shape: {stad.shape}, mean shape: {mean.shape}")
