@@ -573,24 +573,16 @@ def do_train(train_config, accelerator):
             with torch.no_grad():
                 latents = vae.encode(batch["images"].to(accelerator.device, dtype=vae.dtype)).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
-                
-                # Add this debug code before the problematic operation
-                # print(f"latents dtype: {latents.dtype}")
-                # print(f"scaling_factor dtype: {type(vae.config.scaling_factor)}")
-                # print(f"VAE dtype: {next(vae.parameters()).dtype}")
-                # print(f"Text encoder dtype: {next(text_encoder.parameters()).dtype} {text_encoder.dtype}")
-                # print(f"Image encoder dtype: {next(image_encoder.parameters()).dtype} {image_encoder.dtype}")
-
 
                 image_embeds = image_encoder(batch["clip_images"].to(accelerator.device, dtype=image_encoder.dtype)).image_embeds
                 text_embeds = text_encoder(batch["text_input_ids"].to(accelerator.device))[0]
 
             image_embeds_ = []
             for image_embed, drop_image_embed in zip(image_embeds, batch["drop_image_embeds"]):
-                # if drop_image_embed == 1:
-                #     image_embeds_.append(torch.zeros_like(image_embed))
-                # else:
-                image_embeds_.append(image_embed)
+                if drop_image_embed == 1:
+                    image_embeds_.append(torch.zeros_like(image_embed))
+                else:
+                    image_embeds_.append(image_embed)
             image_embeds = torch.stack(image_embeds_)
 
             x = latents
@@ -649,16 +641,16 @@ def do_train(train_config, accelerator):
                     checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}.pt"
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
-                    demox = unigen.sampling_loop(demo_z, ema, **dict(encoder_hidden_states=demo_y))
-    
-                    demox = demox[1::2].reshape(-1, *demox.shape[2:])
-                    print(f"Demox images shape: {demox.shape}, stad shape: {stad.shape}, mean shape: {mean.shape}")
-                    demox = (demox * stad) / latent_multiplier + mean
-                    demox = decode_latents_to_images(vae, demox).cpu()
-                    demoimages_path = f"{demoimages_dir}/{train_steps:07d}.png"
-                    save_image(demox, os.path.join(demoimages_path), nrow=len(demo_y))
-                    logger.info(f"Saved demoimages to {demoimages_path}")
-                    del checkpoint, demox
+
+                    # demox = unigen.sampling_loop(demo_z, ema, **dict(encoder_hidden_states=demo_y))
+                    # demox = demox[1::2].reshape(-1, *demox.shape[2:])
+                    # print(f"Demox images shape: {demox.shape}, stad shape: {stad.shape}, mean shape: {mean.shape}")
+                    # demox = (demox * stad) / latent_multiplier + mean
+                    # demox = decode_latents_to_images(vae, demox).cpu()
+                    # demoimages_path = f"{demoimages_dir}/{train_steps:07d}.png"
+                    # save_image(demox, os.path.join(demoimages_path), nrow=len(demo_y))
+                    # logger.info(f"Saved demoimages to {demoimages_path}")
+                    # del checkpoint, demox
 
                 dist.barrier()
 
