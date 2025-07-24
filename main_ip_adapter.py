@@ -247,13 +247,6 @@ class IPAdapter(torch.nn.Module):
 
         if ckpt_path is not None:
             self.load_from_checkpoint(ckpt_path)
-
-    # def forward(self, noisy_latents, timesteps, encoder_hidden_states, image_embeds):
-    #     ip_tokens = self.image_proj_model(image_embeds)
-    #     encoder_hidden_states = torch.cat([encoder_hidden_states, ip_tokens], dim=1)
-    #     # Predict the noise residual
-    #     noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
-    #     return noise_pred
     
     def get_encoder_hidden_states(self, text_embeds, image_embeds):
         """
@@ -369,7 +362,7 @@ def get_model(train_config, accelerator):
         weight_dtype = torch.float16
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
-    #unet.to(accelerator.device, dtype=weight_dtype)
+    # unet.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     image_encoder.to(accelerator.device, dtype=weight_dtype)
@@ -411,12 +404,6 @@ def do_train(train_config, accelerator):
     latent_size = train_config["data"]["image_size"] // downsample_ratio
     # Load scheduler, tokenizer and models.
 
-    # model = NETWORKS[train_config["model"]["type"]](
-    #     input_size=latent_size,
-    #     num_classes=train_config["data"]["num_classes"],
-    #     in_channels=(train_config["model"]["in_chans"]),
-    # ).to(device)
-
     model, params_to_opt, tokenizer, vae, text_encoder, image_encoder = get_model(train_config, accelerator)
     model = model.to(device)
     params_to_opt_list = list(params_to_opt)
@@ -429,40 +416,40 @@ def do_train(train_config, accelerator):
         os.makedirs(demoimages_dir, exist_ok=True)
 
         # 准备demo数据
-        demo_texts = ["a beautiful landscape", "a cute cat"]
-        demo_text_inputs = tokenizer(
-            demo_texts,
-            max_length=tokenizer.model_max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt"
-        ).input_ids.to(device)
+        # demo_texts = ["a beautiful landscape", "a cute cat"]
+        # demo_text_inputs = tokenizer(
+        #     demo_texts,
+        #     max_length=tokenizer.model_max_length,
+        #     padding="max_length",
+        #     truncation=True,
+        #     return_tensors="pt"
+        # ).input_ids.to(device)
         
         # 创建假的图像embeddings或使用真实图像
-        batch_size = len(demo_texts)
+        # batch_size = len(demo_texts)
         # demo_image_embeds = torch.randn(
         #     batch_size, 
         #     image_encoder.config.projection_dim, 
         #     device=device,
         #     dtype=image_encoder.dtype
         # )
-        demo_image_embeds = torch.zeros(
-            batch_size, 
-            image_encoder.config.projection_dim, 
-            device=device,
-            dtype=image_encoder.dtype
-        )
+        # demo_image_embeds = torch.zeros(
+        #     batch_size, 
+        #     image_encoder.config.projection_dim, 
+        #     device=device,
+        #     dtype=image_encoder.dtype
+        # )
         
         # 生成text embeddings和最终的encoder hidden states
-        with torch.no_grad():
-            demo_text_embeds = text_encoder(demo_text_inputs)[0]
-            demo_y = ema.get_encoder_hidden_states(demo_text_embeds, demo_image_embeds)
+        # with torch.no_grad():
+        #     demo_text_embeds = text_encoder(demo_text_inputs)[0]
+        #     demo_y = ema.get_encoder_hidden_states(demo_text_embeds, demo_image_embeds)
         
-        latent_channels = vae.config.latent_channels
-        demo_z = torch.randn(
-            batch_size, latent_channels, latent_size, latent_size, device=device
-        )
-        print(f"Demo z shape: {demo_z.shape}, demo_y shape: {demo_y.shape}")
+        # latent_channels = vae.config.latent_channels
+        # demo_z = torch.randn(
+        #     batch_size, latent_channels, latent_size, latent_size, device=device
+        # )
+        # print(f"Demo z shape: {demo_z.shape}, demo_y shape: {demo_y.shape}")
 
     unigen = METHODES["unigen"](
         transport_type=train_config["transport"]["type"],

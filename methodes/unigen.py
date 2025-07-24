@@ -404,7 +404,7 @@ class UCGMTS(torch.nn.Module):
         samples = [inital_noise_z]
         for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):
             
-            print(f"Sampling step {i}/{num_steps}, t_cur: {t_cur:.4f}, t_next: {t_next:.4f}, alpha_in: {self.alpha_in(t_cur):.4f}, gamma_in: {self.gamma_in(t_cur):.4f}")
+            # print(f"Sampling step {i}/{num_steps}, t_cur: {t_cur:.4f}, t_next: {t_next:.4f}, alpha_in: {self.alpha_in(t_cur):.4f}, gamma_in: {self.gamma_in(t_cur):.4f}")
 
             # First order prediction
             x_hat, z_hat, _, _ = self.forward(
