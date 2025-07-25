@@ -15,6 +15,7 @@ import argparse
 import json
 import time
 import itertools
+from datetime import datetime
 import numpy as np
 from tqdm import tqdm
 from time import time
@@ -35,13 +36,11 @@ from utilities import create_logger, load_config
 from utilities import set_seed, update_ema, remove_module_prefix, remove_module_all
 
 from ip_adapter.ip_adapter import ImageProjModel
-from ip_adapter.utils import is_torch2_available
+from ip_adapter.utils import is_torch2_available, get_generator
 if is_torch2_available():
     from ip_adapter.attention_processor import IPAttnProcessor2_0 as IPAttnProcessor, AttnProcessor2_0 as AttnProcessor
 else:
     from ip_adapter.attention_processor import IPAttnProcessor, AttnProcessor
-
-
 
 
 class MyDataset(torch.utils.data.Dataset):
@@ -76,7 +75,7 @@ class MyDataset(torch.utils.data.Dataset):
         if compute_latent_stats and vae is not None:
             self._compute_latent_statistics()
         
-    def _compute_latent_statistics(self, sample_size=1000, batch_size=16):
+    def _compute_latent_statistics(self, sample_size=128, batch_size=16):
         """
         Compute mean and std of latent representations
         
@@ -292,23 +291,6 @@ class IPAdapter(torch.nn.Module):
         print(f"Successfully loaded weights from checkpoint {ckpt_path}")
 
 
-def decode_latents_to_images(vae, latents):
-    """将AutoencoderKL的latents解码为图像
-    
-    Args:
-        vae: AutoencoderKL实例
-        latents: 潜在张量
-        
-    Returns:
-        torch.Tensor: [0, 1]范围的图像张量
-    """
-    with torch.no_grad():
-        decoded = vae.decode(latents).sample
-        images = torch.clamp((decoded + 1) / 2, 0, 1)
-        
-    return images
-
-
 def get_model(train_config, accelerator):
     pretrained_model_name_or_path = train_config['model']["pretrained_model_name_or_path"]
     image_encoder_path = train_config['model']["image_encoder_path"]
@@ -318,7 +300,7 @@ def get_model(train_config, accelerator):
     unet = UNet2DConditionModel.from_pretrained(pretrained_model_name_or_path, subfolder="unet")
     image_encoder = CLIPVisionModelWithProjection.from_pretrained(image_encoder_path)
     # freeze parameters of models to save more memory
-    unet.requires_grad_(False)
+    # unet.requires_grad_(True)
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     image_encoder.requires_grad_(False)
@@ -356,12 +338,14 @@ def get_model(train_config, accelerator):
     adapter_modules = torch.nn.ModuleList(unet.attn_processors.values())
     
     ip_adapter = IPAdapter(unet, image_proj_model, adapter_modules, train_config['model']["pretrained_ip_adapter_path"])
+    ip_adapter.requires_grad_(False)
+    ip_adapter.unet.requires_grad_(True)
     
-    weight_dtype = torch.float32
-    if accelerator.mixed_precision == "fp16":
-        weight_dtype = torch.float16
-    elif accelerator.mixed_precision == "bf16":
-        weight_dtype = torch.bfloat16
+    weight_dtype = torch.float16
+    # if accelerator.mixed_precision == "fp16":
+    #     weight_dtype = torch.float16
+    # elif accelerator.mixed_precision == "bf16":
+    #     weight_dtype = torch.bfloat16
     # unet.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
@@ -370,11 +354,120 @@ def get_model(train_config, accelerator):
     unet.to(accelerator.device, dtype=weight_dtype)
     image_proj_model.to(accelerator.device, dtype=weight_dtype)
     ip_adapter.to(accelerator.device, dtype=weight_dtype)
+ 
 
-
-    params_to_opt = itertools.chain(ip_adapter.image_proj_model.parameters(),  ip_adapter.adapter_modules.parameters())
+    # params_to_opt = itertools.chain(ip_adapter.image_proj_model.parameters(),  ip_adapter.adapter_modules.parameters())
+    params_to_opt = itertools.chain(unet.parameters())
 
     return ip_adapter, params_to_opt, tokenizer, vae, text_encoder, image_encoder
+
+
+
+def do_eval(unigen, model, vae, text_encoder, image_encoder, tokenizer, latent_size, demoimages_dir, train_steps, device, seed=42):
+
+    if hasattr(model, "module"):
+        model = model.module
+
+    """
+    Evaluate the model on a validation set.
+    """
+    image = Image.open("/gpfs/share/home/2301110044/ccy/code/IP-Adapter/assets/images/river.png").convert("RGB")
+    clip_image_processor = CLIPImageProcessor()
+    clip_image = clip_image_processor(images=image, return_tensors="pt").pixel_values
+    clip_image_embeds = image_encoder(clip_image.to(device, dtype=vae.dtype)).image_embeds
+    # repeat 4 times
+    num_samples = 2
+    guidance_scale = 7.5
+    sampling_steps = 50
+    # clip_image_embeds = clip_image_embeds.repeat(4, 1, 1)
+
+    # generate prompts
+    num_prompts = clip_image_embeds.size(0)
+    prompt = ["best quality, high quality"] * num_prompts
+    negative_prompt = ["monochrome, lowres, bad anatomy, worst quality, low quality"] * num_prompts
+    batch_size = len(prompt) if isinstance(prompt, list) else 1
+
+    # encode image prompts
+    image_prompt_embeds = model.image_proj_model(clip_image_embeds)
+    uncond_image_prompt_embeds = model.image_proj_model(torch.zeros_like(clip_image_embeds))
+    bs_embed, seq_len, _ = image_prompt_embeds.shape
+    image_prompt_embeds = image_prompt_embeds.repeat(1, num_samples, 1).view(bs_embed * num_samples, seq_len, -1)
+    uncond_image_prompt_embeds = uncond_image_prompt_embeds.repeat(1, num_samples, 1).view(bs_embed * num_samples, seq_len, -1)
+
+    # encode text prompts
+    text_input_ids = tokenizer(prompt, padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt").input_ids
+    if text_input_ids.shape[-1] > tokenizer.model_max_length:
+        text_input_ids = text_input_ids[:, :tokenizer.model_max_length]
+    uncond_input_ids = tokenizer(negative_prompt, padding="max_length", max_length=text_input_ids.shape[-1], truncation=True, return_tensors="pt").input_ids
+
+    text_prompt_embeds = text_encoder(text_input_ids.to(device))[0]
+    text_prompt_embeds = text_prompt_embeds.repeat(1, num_samples, 1).view(batch_size * num_samples, -1, text_prompt_embeds.shape[-1])
+    text_negative_prompt_embeds = text_encoder(uncond_input_ids.to(device))[0]
+    text_negative_prompt_embeds = text_negative_prompt_embeds.repeat(1, num_samples, 1).view(batch_size * num_samples, -1, text_negative_prompt_embeds.shape[-1])
+
+    # concat prompt
+    prompt_embeds = torch.cat([text_prompt_embeds, image_prompt_embeds], dim=1)
+    negative_prompt_embeds = torch.cat([text_negative_prompt_embeds, uncond_image_prompt_embeds], dim=1)
+
+    def cfg_model_wrapper(x_t, t, negative_prompt_embeds, prompt_embeds):
+        # Expand the latents for classifier-free guidance
+        if guidance_scale > 1.0:
+            latent_model_input = torch.cat([x_t] * 2)
+            encoder_hidden_states = torch.cat([negative_prompt_embeds, prompt_embeds])
+            t = t.repeat(2)  # Repeat t for both unconditioned and conditioned inputs
+        else:
+            latent_model_input = x_t
+            encoder_hidden_states = prompt_embeds
+        
+        # Predict noise
+        noise_pred = model.unet(
+            latent_model_input,
+            t * 1000,   # scale t to match the model's expected input
+            encoder_hidden_states=encoder_hidden_states,
+            return_dict=False,
+        )[0]
+        
+        # Apply classifier-free guidance
+        if guidance_scale > 1.0:
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+        
+        return noise_pred
+
+    # generator = get_generator(seed, device)
+    with torch.inference_mode():
+        generator = get_generator(seed, device)
+        latent_channels = model.unet.config.in_channels
+        latents = torch.randn(
+            (num_prompts * num_samples, latent_channels, latent_size, latent_size),
+            device=device,
+            generator=generator,
+            dtype=vae.dtype
+        )
+
+        samples = unigen.sampling_loop(
+            inital_noise_z=latents,
+            sampling_model=cfg_model_wrapper,
+            sampling_steps=sampling_steps,
+            stochast_ratio=0.0,
+            extrapol_ratio=0.0,
+            sampling_order=1,
+            time_dist_ctrl=[1.0, 1.0, 1.0],
+            rfba_gap_steps=[0.019, 0.001],
+            prompt_embeds=prompt_embeds,
+            negative_prompt_embeds=negative_prompt_embeds,
+        )
+        # print(f"Samples shape: {samples.shape}, dtype: {samples.dtype}")
+        samples = samples[1::2].reshape(-1, *samples.shape[2:])
+        # print(f"Samples shape: {samples.shape}, dtype: {samples.dtype}")
+        with torch.no_grad():
+            # samples = (samples * dataset._latent_std.cuda()) / dataset.latent_multiplier + dataset._latent_mean.cuda()
+            samples = samples / vae.config.scaling_factor
+            samples = vae.decode(samples).sample
+            samples = torch.clamp((samples + 1) / 2, 0, 1)
+        save_image(samples, f"{demoimages_dir}/{train_steps:07d}.png", nrow=num_samples)
+        print(f"Sampled images saved to {demoimages_dir}/{train_steps:07d}.png")
+
 
 def do_train(train_config, accelerator):
     """
@@ -389,6 +482,14 @@ def do_train(train_config, accelerator):
     experiment_dir = f"{train_config['output_dir']}/{train_config['exp_name']}"
     checkpoint_dir = f"{experiment_dir}/checkpoints"
 
+    # mkdir if not exist
+    os.makedirs(experiment_dir, exist_ok=True)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    # load config into experiment_dir with formatted json
+    with open(f"{experiment_dir}/config.json", "w") as f:
+        json.dump(train_config, f, indent=4)
+
     # Setup an experiment folder:
     if accelerator.is_main_process:
         os.makedirs(train_config["output_dir"], exist_ok=True)
@@ -402,54 +503,17 @@ def do_train(train_config, accelerator):
         train_config["data"]["image_size"] % downsample_ratio == 0
     ), "Image size must be divisible by 8 (for the VAE encoder)."
     latent_size = train_config["data"]["image_size"] // downsample_ratio
-    # Load scheduler, tokenizer and models.
 
+    # Load scheduler, tokenizer and models.
     model, params_to_opt, tokenizer, vae, text_encoder, image_encoder = get_model(train_config, accelerator)
     model = model.to(device)
     params_to_opt_list = list(params_to_opt)
-    print(f"[{rank}] {len(params_to_opt_list)}, params to optimize")
-    
+
     ema = deepcopy(model).requires_grad_(False).to(device)
 
     if accelerator.is_main_process:
         demoimages_dir = f"{experiment_dir}/demoimages"
         os.makedirs(demoimages_dir, exist_ok=True)
-
-        # 准备demo数据
-        # demo_texts = ["a beautiful landscape", "a cute cat"]
-        # demo_text_inputs = tokenizer(
-        #     demo_texts,
-        #     max_length=tokenizer.model_max_length,
-        #     padding="max_length",
-        #     truncation=True,
-        #     return_tensors="pt"
-        # ).input_ids.to(device)
-        
-        # 创建假的图像embeddings或使用真实图像
-        # batch_size = len(demo_texts)
-        # demo_image_embeds = torch.randn(
-        #     batch_size, 
-        #     image_encoder.config.projection_dim, 
-        #     device=device,
-        #     dtype=image_encoder.dtype
-        # )
-        # demo_image_embeds = torch.zeros(
-        #     batch_size, 
-        #     image_encoder.config.projection_dim, 
-        #     device=device,
-        #     dtype=image_encoder.dtype
-        # )
-        
-        # 生成text embeddings和最终的encoder hidden states
-        # with torch.no_grad():
-        #     demo_text_embeds = text_encoder(demo_text_inputs)[0]
-        #     demo_y = ema.get_encoder_hidden_states(demo_text_embeds, demo_image_embeds)
-        
-        # latent_channels = vae.config.latent_channels
-        # demo_z = torch.randn(
-        #     batch_size, latent_channels, latent_size, latent_size, device=device
-        # )
-        # print(f"Demo z shape: {demo_z.shape}, demo_y shape: {demo_y.shape}")
 
     unigen = METHODES["unigen"](
         transport_type=train_config["transport"]["type"],
@@ -490,7 +554,7 @@ def do_train(train_config, accelerator):
         vae=vae,
         compute_latent_stats=True,
     )
-    
+
     batch_size_per_gpu = (
         train_config["train"]["global_batch_size"] // accelerator.num_processes
     )
@@ -572,8 +636,16 @@ def do_train(train_config, accelerator):
                     image_embeds_.append(image_embed)
             image_embeds = torch.stack(image_embeds_)
 
+
             x = latents
-            y = model.module.get_encoder_hidden_states(text_embeds, image_embeds)
+            if hasattr(model, "get_encoder_hidden_states"):
+                # Use the IP-Adapter's method to get encoder hidden states
+                y = model.get_encoder_hidden_states(text_embeds, image_embeds)
+            else:
+                y = model.module.get_encoder_hidden_states(text_embeds, image_embeds)
+
+            # def ddim_model_wrapper(x_t, t, **model_kwargs):
+            #     return model(x_t, t * 1000, **model_kwargs)
 
             loss = unigen.training_step(model, x, y)
 
@@ -587,7 +659,10 @@ def do_train(train_config, accelerator):
             for param in model.parameters():
                 if param.grad is not None:
                     torch.nan_to_num_(param.grad, nan=0.0, posinf=0.0, neginf=0.0)
-            opt.step()
+            
+            # if hasattr(model, "module"):
+            #     print(f"Loss {loss.item()}, Grad norm of 1st unet param {torch.norm(list(model.module.unet.parameters())[0].grad, p='fro')}.")
+            # opt.step()
             update_ema(ema, model, train_config["train"]["ema_decay"])
 
             # Log loss values:
@@ -629,15 +704,7 @@ def do_train(train_config, accelerator):
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
 
-                    # demox = unigen.sampling_loop(demo_z, ema, **dict(encoder_hidden_states=demo_y))
-                    # demox = demox[1::2].reshape(-1, *demox.shape[2:])
-                    # print(f"Demox images shape: {demox.shape}, stad shape: {stad.shape}, mean shape: {mean.shape}")
-                    # demox = (demox * stad) / latent_multiplier + mean
-                    # demox = decode_latents_to_images(vae, demox).cpu()
-                    # demoimages_path = f"{demoimages_dir}/{train_steps:07d}.png"
-                    # save_image(demox, os.path.join(demoimages_path), nrow=len(demo_y))
-                    # logger.info(f"Saved demoimages to {demoimages_path}")
-                    # del checkpoint, demox
+                    do_eval(unigen, model, vae, text_encoder, image_encoder, tokenizer, latent_size, demoimages_dir, train_steps, device)
 
                 dist.barrier()
 
@@ -647,7 +714,6 @@ def do_train(train_config, accelerator):
             break
     if accelerator.is_main_process:
         logger.info("Done!")
-
     return accelerator
 
 
@@ -661,4 +727,9 @@ if __name__ == "__main__":
     train_config = load_config(args.config)
     par_path = args.config.split("/")
     train_config["exp_name"] = os.path.join(par_path[-2], par_path[-1].split(".")[0])
+    train_config["exp_name"] = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}-{train_config['exp_name']}"
+
     do_train(train_config, accelerator)
+
+
+

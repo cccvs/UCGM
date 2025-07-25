@@ -203,6 +203,12 @@ class UCGMTS(torch.nn.Module):
         dent = self.alpha_in(t) * self.gamma_to(t) - self.gamma_in(t) * self.alpha_to(t)
         _t = torch.ones(x_t.size(0), device=x_t.device) * (t).flatten()
         _t = _t if self.integ_st == 1 else 1 - _t
+
+        if isinstance(model, torch.nn.Module):
+            from diffusers import UNet2DConditionModel
+            unwrapped_model = model.module if hasattr(model, "module") else model
+            if isinstance(unwrapped_model, UNet2DConditionModel) or isinstance(unwrapped_model.unet, UNet2DConditionModel):
+                _t = _t * 1000
         F_t = (-1) ** (1 - self.integ_st) * model(x_t, _t, **model_kwargs)
 
         # print(f"x_t std: {x_t.view(x_t.shape[0], -1).std(dim=1)}, _t: {_t}")
@@ -239,8 +245,8 @@ class UCGMTS(torch.nn.Module):
         c[-ndrop:] = 0.0  # Dropout labels for enhanced target
 
         # Initialize target and model prediction
-        print(f"t {t.flatten()}, a_in {self.alpha_in(t).flatten()}, g_in {self.gamma_in(t).flatten()}")
-        print(f"x_std: {x.view(x.shape[0], -1).std(dim=1)}, z_std: {z.view(z.shape[0], -1).std(dim=1)}")
+        # print(f"t {t.flatten()}, a_in {self.alpha_in(t).flatten()}, g_in {self.gamma_in(t).flatten()}")
+        # print(f"x_std: {x.view(x.shape[0], -1).std(dim=1)}, z_std: {z.view(z.shape[0], -1).std(dim=1)}")
         x_t = z * self.alpha_in(t) + x * self.gamma_in(t)
         rng_state = torch.cuda.get_rng_state()
         x_wc_t, z_wc_t, F_th_t, den_t = self.forward(model, x_t, t, **dict(encoder_hidden_states=c))
@@ -250,10 +256,10 @@ class UCGMTS(torch.nn.Module):
             if self.cor != 0.0 or self.enr != 0.0:
                 if self.emd > 0.0 and self.emd < 1.0:
                     self.mod = self.mod or deepcopy(model).requires_grad_(False).train()
-                    update_ema(self.mod, model.module, decay=self.cmd)
+                    update_ema(self.mod, (model.module if hasattr(model, "module") else model), decay=self.cmd)
                     self.cmd += (1 - self.cmd) * (self.emd - self.cmd) * 0.5
                 elif self.emd == 0.0:
-                    self.mod = model.module
+                    self.mod = (model.module if hasattr(model, "module") else model)
                 elif self.emd == 1.0:
                     self.mod = self.mod or deepcopy(model).requires_grad_(False).train()
 
@@ -290,7 +296,7 @@ class UCGMTS(torch.nn.Module):
                 def xfunc(r):
                     torch.cuda.set_rng_state(rng_state)
                     xr = self.alpha_in(r) * z + self.gamma_in(r) * x
-                    _, _, F_th_r, den_r = self.forward(model.module, xr, r, **dict(encoder_hidden_states=c))
+                    _, _, F_th_r, den_r = self.forward((model.module if hasattr(model, "module") else model), xr, r, **dict(encoder_hidden_states=c))
                     if self.enr != 0.0:
                         xr = zs_target * self.alpha_in(r) + xs_target * self.gamma_in(r)
                     pred_x = (F_th_r * self.alpha_in(r) - xr * self.alpha_to(r)) / den_r
