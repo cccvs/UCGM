@@ -204,6 +204,10 @@ class UCGMTS(torch.nn.Module):
         _t = torch.ones(x_t.size(0), device=x_t.device) * (t).flatten()
         _t = _t if self.integ_st == 1 else 1 - _t
         F_t = (-1) ** (1 - self.integ_st) * model(x_t, _t, **model_kwargs)
+
+        # print(f"x_t std: {x_t.view(x_t.shape[0], -1).std(dim=1)}, _t: {_t}")
+        # print(f"F_t std: {F_t.view(F_t.shape[0], -1).std(dim=1)}")
+
         z_hat = (x_t * self.gamma_to(t) - F_t * self.gamma_in(t)) / dent
         x_hat = (F_t * self.alpha_in(t) - x_t * self.alpha_to(t)) / dent
         return x_hat, z_hat, F_t, dent
@@ -235,6 +239,8 @@ class UCGMTS(torch.nn.Module):
         c[-ndrop:] = 0.0  # Dropout labels for enhanced target
 
         # Initialize target and model prediction
+        print(f"t {t.flatten()}, a_in {self.alpha_in(t).flatten()}, g_in {self.gamma_in(t).flatten()}")
+        print(f"x_std: {x.view(x.shape[0], -1).std(dim=1)}, z_std: {z.view(z.shape[0], -1).std(dim=1)}")
         x_t = z * self.alpha_in(t) + x * self.gamma_in(t)
         rng_state = torch.cuda.get_rng_state()
         x_wc_t, z_wc_t, F_th_t, den_t = self.forward(model, x_t, t, **dict(encoder_hidden_states=c))
@@ -398,7 +404,7 @@ class UCGMTS(torch.nn.Module):
         x_hats, z_hats, buffer_freq = [], [], 1
 
         # Main sampling loop
-        print(f"time steps: {t_steps}")
+        # print(f"time steps: {t_steps}")
 
         x_cur = inital_noise_z.to(torch.float64)
         samples = [inital_noise_z]

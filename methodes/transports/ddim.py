@@ -3,16 +3,20 @@ import torch
 class DDIM:
 
     def __init__(self, **kwargs):
+        self.dtype = torch.float64
         self.beta_scheduler = kwargs.get("beta_scheduler", "scaled_linear")
-        self.num_train_timesteps = torch.tensor(kwargs.get("num_train_timesteps", 1000))
-        self.beta_start = torch.tensor(kwargs.get("beta_start", 0.00085))
-        self.beta_end = torch.tensor(kwargs.get("beta_end", 0.012))
+        self.num_train_timesteps = torch.tensor(kwargs.get("num_train_timesteps", 1000), dtype=self.dtype)
+        self.beta_start = torch.tensor(kwargs.get("beta_start", 0.00085), dtype=self.dtype)
+        self.beta_end = torch.tensor(kwargs.get("beta_end", 0.012), dtype=self.dtype)
 
     def alpha_bar(self, t):
         """
         Compute the continuous version of alpha_bar(t), where t ∈ [0, 1]
         Corresponds to the continuous form of the cumulative product ∏(1-β_i)
         """
+        original_dtype = t.dtype
+        t = t.to(self.dtype)
+        
         if self.beta_scheduler == "linear":
             # \beta_t = beta_start + t * (beta_end - beta_start)
             k = self.num_train_timesteps * t
@@ -20,7 +24,7 @@ class DDIM:
             return torch.exp(
                 -k * torch.log(delta_inv) +
                 (torch.lgamma((1 - self.beta_start) * delta_inv) - torch.lgamma((1 - self.beta_start) * delta_inv - k))
-            )
+            ).to(original_dtype)
         elif self.beta_scheduler == "scaled_linear":
             # \beta_t = (self.beta_start ** 0.5 + t * (self.beta_end ** 0.5 - self.beta_start ** 0.5)) ** 2
             k = self.num_train_timesteps * t
@@ -30,7 +34,7 @@ class DDIM:
                 -2 * k * torch.log(delta_inv) +
                 (torch.lgamma(x_minus) - torch.lgamma(x_minus - k)) +
                 (torch.lgamma(x_plus + k + 1) - torch.lgamma(x_plus + 1))
-            )
+            ).to(original_dtype)
         else:
             raise ValueError(f"Unknown beta scheduler: {self.beta_scheduler}")
 

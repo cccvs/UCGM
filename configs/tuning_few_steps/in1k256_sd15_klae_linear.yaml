@@ -5,13 +5,13 @@ data:
   image_size: 512
   image_root_path: './sd_data_2k'
   num_workers: 8
+  latent_multiplier: 0.18215
 #   data_path: './buffers/data/sdvae_f8c4/train_256'
 #   fid_reference_file: './buffers/refs/in1k256_fid_ref.npz'
   
 #   num_classes: 1000
 #   num_workers: 8
 #   latent_norm: False
-#   latent_multiplier: 0.18215
 
 vae:
   type: 'klae_ema_f8c4'
@@ -22,9 +22,9 @@ vae:
 #   in_chans: 4
 
 model:
-  pretrained_model_name_or_path: /data/pretrained_models/stable-diffusion-v1-5
-  image_encoder_path: /data/pretrained_models/IP-Adapter/models/image_encoder
-  pretrained_ip_adapter_path: /data/pretrained_models/IP-Adapter/models/ip-adapter_sd15.bin
+  pretrained_model_name_or_path: /gpfs/share/home/2301110044/pretrained_models/stable-diffusion-v1-5
+  image_encoder_path: /gpfs/share/home/2301110044/pretrained_models/IP-Adapter/models/image_encoder
+  pretrained_ip_adapter_path: /gpfs/share/home/2301110044/pretrained_models/IP-Adapter/models/ip-adapter_sd15.bin
 
 train:
   # ckpt: "0000400.pt" # <---- a model trined using "REPA" (https://github.com/sihyun-yu/REPA)
@@ -33,8 +33,8 @@ train:
   no_buffer: False
   max_steps: 1
   # max_steps: 1
-  global_batch_size: 32
-  # global_batch_size: 1
+  # global_batch_size: 32
+  global_batch_size: 4
   global_seed: 0
   log_every: 50
   ckpt_every: 1
@@ -59,7 +59,7 @@ transport:
   ema_decay_rate: 1.0
   enhanced_range: [0.0, 0.75]
   time_dist_ctrl: [1.0, 1.0, 1.0]
-  weight_funcion: null
+  weight_funcion: Cosine
   wt_cosine_loss: False
 
 sample:
