@@ -75,7 +75,7 @@ class MyDataset(torch.utils.data.Dataset):
         if compute_latent_stats and vae is not None:
             self._compute_latent_statistics()
         
-    def _compute_latent_statistics(self, sample_size=128, batch_size=16):
+    def _compute_latent_statistics(self, sample_size=1024, batch_size=64):
         """
         Compute mean and std of latent representations
         
@@ -144,6 +144,9 @@ class MyDataset(torch.utils.data.Dataset):
         print(f"Latent multiplier: {self.latent_multiplier}")
         print(f"Mean of latent mean: {self._latent_mean.mean().item():.6f}")
         print(f"Mean of latent std: {self._latent_std.mean().item():.6f}")
+
+        torch.cuda.empty_cache()  # Clear GPU memory after computation
+        
 
     def get_latent_stats_cuda(self):
         """
@@ -341,12 +344,12 @@ def get_model(train_config, accelerator):
     ip_adapter.requires_grad_(False)
     ip_adapter.unet.requires_grad_(True)
     
-    weight_dtype = torch.float16
-    # if accelerator.mixed_precision == "fp16":
-    #     weight_dtype = torch.float16
-    # elif accelerator.mixed_precision == "bf16":
-    #     weight_dtype = torch.bfloat16
-    # unet.to(accelerator.device, dtype=weight_dtype)
+    weight_dtype = torch.float32
+    if accelerator.mixed_precision == "fp16":
+        weight_dtype = torch.float16
+    elif accelerator.mixed_precision == "bf16":
+        weight_dtype = torch.bfloat16
+    unet.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     image_encoder.to(accelerator.device, dtype=weight_dtype)
@@ -467,7 +470,7 @@ def do_eval(unigen, model, vae, text_encoder, image_encoder, tokenizer, latent_s
             samples = torch.clamp((samples + 1) / 2, 0, 1)
         save_image(samples, f"{demoimages_dir}/{train_steps:07d}.png", nrow=num_samples)
         print(f"Sampled images saved to {demoimages_dir}/{train_steps:07d}.png")
-
+        torch.cuda.empty_cache()  # Clear GPU memory after evaluation
 
 def do_train(train_config, accelerator):
     """
@@ -528,9 +531,10 @@ def do_train(train_config, accelerator):
         wt_cosine_loss=train_config["transport"]["wt_cosine_loss"],
         weight_funcion=train_config["transport"]["weight_funcion"],
     )
+    unigen.dtype = vae.dtype
     if accelerator.is_main_process:
         logger.info(
-            f"SD15 parameters: {sum(p.numel() for p in params_to_opt_list) / 1e6:.2f}M"
+            f"SD15 parameters: {sum(p.numel() for p in params_to_opt_list) / 1e6:.2f}M. Data type: {vae.dtype}."
         )
         logger.info(
             f"Optimizer: {train_config['optimizer']['type']}, lr={train_config['optimizer']['lr']}, beta1={train_config['optimizer']['beta1']}, beta2={train_config['optimizer']['beta2']}"
@@ -644,9 +648,6 @@ def do_train(train_config, accelerator):
             else:
                 y = model.module.get_encoder_hidden_states(text_embeds, image_embeds)
 
-            # def ddim_model_wrapper(x_t, t, **model_kwargs):
-            #     return model(x_t, t * 1000, **model_kwargs)
-
             loss = unigen.training_step(model, x, y)
 
             opt.zero_grad()
@@ -662,7 +663,7 @@ def do_train(train_config, accelerator):
             
             # if hasattr(model, "module"):
             #     print(f"Loss {loss.item()}, Grad norm of 1st unet param {torch.norm(list(model.module.unet.parameters())[0].grad, p='fro')}.")
-            # opt.step()
+            opt.step()
             update_ema(ema, model, train_config["train"]["ema_decay"])
 
             # Log loss values:
@@ -690,7 +691,7 @@ def do_train(train_config, accelerator):
             # Save checkpoint:
             if (
                 train_steps % train_config["train"]["ckpt_every"] == 0
-                and train_steps > 0
+                # and train_steps > 0   # evaluate at step 0
             ):
                 if accelerator.is_main_process:
                     checkpoint = {

@@ -21,11 +21,11 @@ train:
   no_reopt: True
   no_reuni: True
   no_buffer: False
-  max_steps: 3200 # TODO
-  global_batch_size: 64
+  max_steps: 3200
+  global_batch_size: 32
   global_seed: 0
-  log_every: 10
-  ckpt_every: 400 # TODO
+  log_every: 1
+  ckpt_every: 400
   ema_decay: 0.99
 
 optimizer:

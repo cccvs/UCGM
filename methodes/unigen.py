@@ -177,6 +177,7 @@ class UCGMTS(torch.nn.Module):
         self.step = 0
         self.mod = None
         self.lsw = None
+        self.dtype = torch.float32
 
         transport = TRANSPORTS[transport_type]()
         self.alpha_in, self.gamma_in = transport.alpha_in, transport.gamma_in
@@ -421,8 +422,8 @@ class UCGMTS(torch.nn.Module):
             # First order prediction
             x_hat, z_hat, _, _ = self.forward(
                 sampling_model,
-                x_cur.to(torch.float16),
-                t_cur.to(torch.float16),
+                x_cur.to(self.dtype),
+                t_cur.to(self.dtype),
                 **model_kwargs,
             )
             samples.append(x_hat)
@@ -455,8 +456,8 @@ class UCGMTS(torch.nn.Module):
             if sampling_order == 2 and i < num_steps - 1:
                 x_pri, z_pri, _, _ = self.forward(
                     sampling_model,
-                    x_next.to(torch.float16),
-                    t_next.to(torch.float16),
+                    x_next.to(self.dtype),
+                    t_next.to(self.dtype),
                     **model_kwargs,
                 )
                 x_pri, z_pri = x_pri.to(torch.float64), z_pri.to(torch.float64)
@@ -470,4 +471,4 @@ class UCGMTS(torch.nn.Module):
 
             x_cur = x_next
 
-        return torch.stack(samples, dim=0).to(torch.float16)
+        return torch.stack(samples, dim=0).to(self.dtype)
