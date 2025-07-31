@@ -366,7 +366,7 @@ def get_model(train_config, accelerator):
 
 
 
-def do_eval(unigen, model, vae, text_encoder, image_encoder, tokenizer, latent_size, demoimages_dir, train_steps, device, seed=42):
+def do_eval(unigen, model, vae, text_encoder, image_encoder, tokenizer, train_config, demoimages_dir, train_steps, device, seed=42):
 
     if hasattr(model, "module"):
         model = model.module
@@ -441,6 +441,7 @@ def do_eval(unigen, model, vae, text_encoder, image_encoder, tokenizer, latent_s
     with torch.inference_mode():
         generator = get_generator(seed, device)
         latent_channels = model.unet.config.in_channels
+        latent_size = train_config["data"]["image_size"] // train_config["vae"]["downsample_ratio"]
         latents = torch.randn(
             (num_prompts * num_samples, latent_channels, latent_size, latent_size),
             device=device,
@@ -452,10 +453,10 @@ def do_eval(unigen, model, vae, text_encoder, image_encoder, tokenizer, latent_s
             inital_noise_z=latents,
             sampling_model=cfg_model_wrapper,
             sampling_steps=sampling_steps,
-            stochast_ratio=0.0,
-            extrapol_ratio=0.0,
-            sampling_order=1,
-            time_dist_ctrl=[1.0, 1.0, 1.0],
+            stochast_ratio=train_config["sample"]["stochast_ratio"],
+            extrapol_ratio= train_config["sample"]["extrapol_ratio"],
+            sampling_order= train_config["sample"]["sampling_order"],
+            time_dist_ctrl=train_config["sample"]["time_dist_ctrl"],
             rfba_gap_steps=[0.019, 0.001],
             prompt_embeds=prompt_embeds,
             negative_prompt_embeds=negative_prompt_embeds,
@@ -705,7 +706,7 @@ def do_train(train_config, accelerator):
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
 
-                    do_eval(unigen, model, vae, text_encoder, image_encoder, tokenizer, latent_size, demoimages_dir, train_steps, device)
+                    do_eval(unigen, model, vae, text_encoder, image_encoder, tokenizer, train_config, demoimages_dir, train_steps, device)
 
                 dist.barrier()
 

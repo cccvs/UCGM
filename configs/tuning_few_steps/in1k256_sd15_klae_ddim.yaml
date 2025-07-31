@@ -21,11 +21,11 @@ train:
   no_reopt: True
   no_reuni: True
   no_buffer: False
-  max_steps: 3200
+  max_steps: 20
   global_batch_size: 32
   global_seed: 0
   log_every: 1
-  ckpt_every: 400
+  ckpt_every: 10
   ema_decay: 0.99
 
 optimizer:
@@ -54,12 +54,12 @@ sample:
   type: UNI
   cfg_scale: 0.0
   cfg_interval: [0.00, 0.70]
-  sampling_steps: 2
-  stochast_ratio: 1.0
+  sampling_steps: 50
+  stochast_ratio: 0.0
   extrapol_ratio: 0.0
   sampling_order: 1
   time_dist_ctrl: [1.0, 1.0, 1.0]
-  rfba_gap_steps: [0.001, 0.60]
+  rfba_gap_steps: [0.019, 0.001]
   # per_batch_size: 125
   per_batch_size: 50
   fid_sample_num: 50000 # Sample per device = 50000 / 8 = 6250

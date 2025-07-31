@@ -17,5 +17,5 @@ accelerate launch \
     --num_processes  $(($GPUS_PER_NODE*$NNODES)) \
     --num_machines $NNODES \
     --mixed_precision $PRECISION \
-    main_ip_adapter.py \
+    main_ipa_sd15.py \
     --config $CONFIG_PATH
