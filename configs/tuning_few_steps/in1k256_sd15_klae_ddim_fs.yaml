@@ -1,0 +1,65 @@
+output_dir: './outputs'
+
+data:
+  json_file: './sd_data_2k/captions.json'
+  image_size: 512
+  image_root_path: './sd_data_2k'
+  num_workers: 8
+  latent_multiplier: 0.18215
+
+vae:
+  type: 'klae_ema_f8c4'
+  downsample_ratio: 8
+
+model:
+  pretrained_model_name_or_path: /gpfs/share/home/2301110044/pretrained_models/stable-diffusion-v1-5
+  image_encoder_path: /gpfs/share/home/2301110044/pretrained_models/IP-Adapter/models/image_encoder
+  pretrained_ip_adapter_path: /gpfs/share/home/2301110044/pretrained_models/IP-Adapter/models/ip-adapter_sd15.bin
+
+train:
+  # ckpt: "0000400.pt" # <---- a model trined using "REPA" (https://github.com/sihyun-yu/REPA)
+  no_reopt: True
+  no_reuni: True
+  no_buffer: False
+  max_steps: 3200
+  global_batch_size: 32
+  global_seed: 0
+  log_every: 1
+  ckpt_every: 100
+  ema_decay: 0.99
+
+optimizer:
+  type: 'RAdam'
+  lr: 0.0001
+  weight_decay: 0.0
+  beta1: 0.9
+  beta2: 0.999
+  max_grad_norm: 0.1
+
+transport:
+  type: DDIM
+  consistc_ratio: 0.0
+  ema_decay_rate: 0.999
+  lab_drop_ratio: 0.1
+  enhanced_ratio: 0.6
+  enhanced_style: fc-vs-fe
+  enhanced_range: [0.0, 0.75]
+  scaled_cbl_eps: 0.0
+  weight_funcion: Cosine
+  wt_cosine_loss: True
+  time_dist_ctrl: [1.0, 1.0, 1.0]
+
+sample:
+  ckpt: "0003200.pt"
+  type: UNI
+  cfg_scale: 0.0
+  cfg_interval: [0.00, 0.70]
+  sampling_steps: 50
+  stochast_ratio: 0.0
+  extrapol_ratio: 0.0
+  sampling_order: 1
+  time_dist_ctrl: [1.0, 1.0, 1.0]
+  rfba_gap_steps: [0.019, 0.001]
+  # per_batch_size: 125
+  per_batch_size: 50
+  fid_sample_num: 50000 # Sample per device = 50000 / 8 = 6250
